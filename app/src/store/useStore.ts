@@ -142,6 +142,8 @@ export const useStore = create<Store>()(
         const thema: LernplanThema = {
           id: uuid(),
           titel,
+          notiz: '',
+          fortschritt: 'nicht_begonnen',
           erledigt: false,
           erledigtAm: null,
           naechsteWiederholung: null,
