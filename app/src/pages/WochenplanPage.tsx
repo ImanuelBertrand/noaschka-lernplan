@@ -12,6 +12,7 @@ import {
   aktiveWochentage,
   sollMinutenDerWoche,
   istMinutenDerWoche,
+  fachZeitenDerWoche,
   kalenderwoche,
 } from '../utils/stundenplan';
 import type { Modul, StundenplanBlock, WochenplanEintrag } from '../types';
@@ -186,7 +187,7 @@ interface TagDetailPanelProps {
   tag: { iso: string; label: string; tagLabel: string };
   heute: boolean;
   bloecke: StundenplanBlock[];
-  erledigtIds: Set<string>;
+  blockEintraege: WochenplanEintrag[];
   onToggleBlock: (block: StundenplanBlock) => void;
   manuelleEintraege: WochenplanEintrag[];
   module: Modul[];
@@ -199,7 +200,7 @@ function TagDetailPanel({
   tag,
   heute,
   bloecke,
-  erledigtIds,
+  blockEintraege,
   onToggleBlock,
   manuelleEintraege,
   module,
@@ -233,35 +234,59 @@ function TagDetailPanel({
             .slice()
             .sort((a, b) => blockStartMin(a) - blockStartMin(b))
             .map((b) => {
-              const erledigt = erledigtIds.has(b.id);
+              const eintrag = blockEintraege.find((e) => e.blockId === b.id);
+              const erledigt = !!eintrag;
               const mod = module.find((m) => m.id === b.modulId);
               const istToggle = b.art === 'lernblock';
+              const dauer = blockDauerMin(b);
               return (
                 <div
                   key={b.id}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${
-                    erledigt ? ART_FARBEN[b.art].erledigt : ART_FARBEN[b.art].basis
-                  }`}
+                  className={`rounded-lg px-3 py-2 text-sm ${erledigt ? ART_FARBEN[b.art].erledigt : ART_FARBEN[b.art].basis}`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="break-words font-semibold">{b.titel}</div>
-                    <div className="text-xs opacity-80">
-                      {b.start}&ndash;{b.ende} &middot; {ART_LABEL[b.art]}
-                      {mod && ` · ${mod.kuerzel || mod.name}`}
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="break-words font-semibold">{b.titel}</div>
+                      <div className="text-xs opacity-80">
+                        {b.start}&ndash;{b.ende} &middot; {ART_LABEL[b.art]}
+                        {mod && ` · ${mod.kuerzel || mod.name}`}
+                      </div>
+                      {b.notiz && <div className="mt-0.5 break-words text-xs opacity-70">{b.notiz}</div>}
                     </div>
-                    {b.notiz && <div className="mt-0.5 break-words text-xs opacity-70">{b.notiz}</div>}
+                    {istToggle && (
+                      <button
+                        onClick={() => onToggleBlock(b)}
+                        className={`flex h-11 min-w-[44px] shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-semibold ${
+                          erledigt
+                            ? 'border-current/30 bg-black/10 text-current dark:bg-white/20'
+                            : 'border-slate-300 bg-white text-slate-600 hover:border-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                        }`}
+                      >
+                        {erledigt ? 'zurücksetzen' : 'erledigt?'}
+                      </button>
+                    )}
                   </div>
-                  {istToggle && (
-                    <button
-                      onClick={() => onToggleBlock(b)}
-                      className={`flex h-11 min-w-[44px] shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-semibold ${
-                        erledigt
-                          ? 'border-current/30 bg-black/10 text-current dark:bg-white/20'
-                          : 'border-slate-300 bg-white text-slate-600 hover:border-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      {erledigt ? '✓ erledigt' : 'erledigt?'}
-                    </button>
+                  {istToggle && eintrag && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-current/20 pt-2 text-xs">
+                      <label className="flex items-center gap-1">
+                        <span>Geschafft</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={5}
+                          value={eintrag.tatsaechlichMin}
+                          onChange={(ev) => onBearbeiten(eintrag, { tatsaechlichMin: Number(ev.target.value) })}
+                          className="w-14 rounded border border-slate-300 bg-white/90 px-1.5 py-1 text-slate-900"
+                        />
+                        <span>/ {dauer} min</span>
+                      </label>
+                      <input
+                        placeholder="Notiz, z.B. welche Themen noch fehlen"
+                        value={eintrag.notiz ?? ''}
+                        onChange={(ev) => onBearbeiten(eintrag, { notiz: ev.target.value })}
+                        className="min-w-0 flex-1 rounded border border-slate-300 bg-white/90 px-1.5 py-1 text-slate-900"
+                      />
+                    </div>
                   )}
                 </div>
               );
@@ -322,6 +347,12 @@ function TagDetailPanel({
                     <span>min</span>
                   </label>
                 </div>
+                <input
+                  placeholder="Notiz, z.B. welche Themen noch fehlen"
+                  value={e.notiz ?? ''}
+                  onChange={(ev) => onBearbeiten(e, { notiz: ev.target.value })}
+                  className="mt-1.5 w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                />
               </div>
             );
           })}
@@ -365,6 +396,63 @@ function TagDetailPanel({
   );
 }
 
+function FachZeile({
+  modul,
+  sollMin,
+  istMin,
+  minutenEntwurf,
+  onMinutenChange,
+  onHinzufuegen,
+  zeigeEintrag,
+}: {
+  modul: Modul;
+  sollMin: number;
+  istMin: number;
+  minutenEntwurf: number;
+  onMinutenChange: (minuten: number) => void;
+  onHinzufuegen: () => void;
+  zeigeEintrag: boolean;
+}) {
+  const pct = sollMin > 0 ? Math.min(100, Math.round((istMin / sollMin) * 100)) : 0;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <span className="truncate font-medium">{modul.kuerzel || modul.name}</span>
+          <span className="shrink-0 text-xs text-slate-400">
+            {minutenZuText(istMin)} / {minutenZuText(sollMin)}
+          </span>
+        </div>
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+          <div
+            className={`h-full rounded-full ${istMin >= sollMin && sollMin > 0 ? 'bg-emerald-500' : 'bg-slate-900 dark:bg-white'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+      {zeigeEintrag && (
+        <div className="flex shrink-0 items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            step={5}
+            value={minutenEntwurf}
+            onChange={(e) => onMinutenChange(Number(e.target.value))}
+            className="w-14 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+          />
+          <button
+            onClick={onHinzufuegen}
+            className="flex h-7 min-w-[28px] shrink-0 items-center justify-center rounded-full bg-slate-900 px-2 text-xs font-semibold text-white dark:bg-white dark:text-slate-900"
+            title="Minuten zu heute hinzufügen"
+          >
+            +
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function WochenplanPage() {
   const module = useStore((s) => s.module);
   const wochenplaene = useStore((s) => s.wochenplaene);
@@ -381,6 +469,7 @@ export default function WochenplanPage() {
   const [montag, setMontag] = useState(montagDerWoche());
   const [ausgewaehlterTag, setAusgewaehlterTag] = useState<string | null>(null);
   const [jetzt, setJetzt] = useState(() => new Date());
+  const [fachMinutenEntwurf, setFachMinutenEntwurf] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const interval = setInterval(() => setJetzt(new Date()), 30_000);
@@ -407,6 +496,24 @@ export default function WochenplanPage() {
 
   const erledigtIds = new Set(eintraege.filter((e) => e.blockId).map((e) => e.blockId as string));
 
+  const fachZeiten = fachZeitenDerWoche(bloeckeWoche, eintraege);
+  const fachZeitenByModul = new Map(fachZeiten.map((f) => [f.modulId, f]));
+  const aktiveModule = module.filter((m) => m.status !== 'bestanden');
+
+  function fachSchnellEintrag(modulId: string, minuten: number) {
+    if (!istAktuelleWoche || minuten <= 0) return;
+    const bestehender = eintraege.find((e) => e.modulId === modulId && e.tag === heuteIso && !e.blockId);
+    if (bestehender) {
+      upsertEintrag(montag, {
+        ...bestehender,
+        geplantMin: bestehender.geplantMin + minuten,
+        tatsaechlichMin: bestehender.tatsaechlichMin + minuten,
+      });
+    } else {
+      upsertEintrag(montag, { id: uuid(), modulId, tag: heuteIso, geplantMin: minuten, tatsaechlichMin: minuten, notiz: '' });
+    }
+  }
+
   const ausgewaehlteTagIso =
     (ausgewaehlterTag && aktiveTage.some((t) => t.iso === ausgewaehlterTag) ? ausgewaehlterTag : null) ??
     aktiveTage.find((t) => t.iso === heuteIso)?.iso ??
@@ -416,6 +523,7 @@ export default function WochenplanPage() {
   const ausgewaehlterTagObj = tage.find((t) => t.iso === ausgewaehlteTagIso) ?? tage[0];
   const bloeckeTag = bloeckeWoche.filter((b) => tage[b.wochentag]?.iso === ausgewaehlteTagIso);
   const manuelleEintraegeTag = eintraege.filter((e) => e.tag === ausgewaehlteTagIso && !e.blockId);
+  const blockEintraegeTag = eintraege.filter((e) => e.tag === ausgewaehlteTagIso && e.blockId);
 
   return (
     <div>
@@ -470,6 +578,29 @@ export default function WochenplanPage() {
         </div>
       </div>
 
+      {aktiveModule.length > 0 && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Lernzeit pro Fach · diese Woche</div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {aktiveModule.map((m) => {
+              const fz = fachZeitenByModul.get(m.id);
+              return (
+                <FachZeile
+                  key={m.id}
+                  modul={m}
+                  sollMin={fz?.sollMin ?? 0}
+                  istMin={fz?.istMin ?? 0}
+                  minutenEntwurf={fachMinutenEntwurf[m.id] ?? 15}
+                  onMinutenChange={(minuten) => setFachMinutenEntwurf((s) => ({ ...s, [m.id]: minuten }))}
+                  onHinzufuegen={() => fachSchnellEintrag(m.id, fachMinutenEntwurf[m.id] ?? 15)}
+                  zeigeEintrag={istAktuelleWoche}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-col gap-4 lg:flex-row">
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:flex-[2]">
           <div className="flex">
@@ -514,12 +645,19 @@ export default function WochenplanPage() {
             tag={ausgewaehlterTagObj}
             heute={ausgewaehlterTagObj.iso === heuteIso}
             bloecke={bloeckeTag}
-            erledigtIds={erledigtIds}
+            blockEintraege={blockEintraegeTag}
             onToggleBlock={(block) => toggleBlockErledigt(montag, block, ausgewaehlterTagObj.iso)}
             manuelleEintraege={manuelleEintraegeTag}
             module={module}
             onHinzufuegen={(modulId, geplantMin) =>
-              upsertEintrag(montag, { id: uuid(), modulId, tag: ausgewaehlterTagObj.iso, geplantMin, tatsaechlichMin: 0 })
+              upsertEintrag(montag, {
+                id: uuid(),
+                modulId,
+                tag: ausgewaehlterTagObj.iso,
+                geplantMin,
+                tatsaechlichMin: geplantMin,
+                notiz: '',
+              })
             }
             onBearbeiten={(eintrag, patch) => upsertEintrag(montag, { ...eintrag, ...patch })}
             onLoeschen={(eintragId) => deleteEintrag(montag, eintragId)}
