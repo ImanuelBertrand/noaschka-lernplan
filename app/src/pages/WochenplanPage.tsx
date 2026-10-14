@@ -13,6 +13,9 @@ import {
   sollMinutenDerWoche,
   istMinutenDerWoche,
   fachZeitenDerWoche,
+  sichtbarerBlockDesEintrags,
+  blockDesEintragsZaehltInWoche,
+  zusatzSollMinDesEintrags,
   kalenderwoche,
 } from '../utils/stundenplan';
 import type { Modul, StundenplanBlock, WochenplanEintrag } from '../types';
@@ -190,6 +193,8 @@ interface TagDetailPanelProps {
   blockEintraege: WochenplanEintrag[];
   onBearbeitenBlock: (block: StundenplanBlock, patch: Partial<Pick<WochenplanEintrag, 'tatsaechlichMin' | 'notiz'>>) => void;
   manuelleEintraege: WochenplanEintrag[];
+  manuellSoll: number;
+  verschobeneEintragIds: Set<string>;
   module: Modul[];
   onHinzufuegen: (modulId: string, geplantMin: number) => void;
   onBearbeiten: (eintrag: WochenplanEintrag, patch: Partial<WochenplanEintrag>) => void;
@@ -203,6 +208,8 @@ function TagDetailPanel({
   blockEintraege,
   onBearbeitenBlock,
   manuelleEintraege,
+  manuellSoll,
+  verschobeneEintragIds,
   module,
   onHinzufuegen,
   onBearbeiten,
@@ -211,7 +218,6 @@ function TagDetailPanel({
   const [modulId, setModulId] = useState(module[0]?.id ?? '');
   const [geplantMin, setGeplantMin] = useState(30);
 
-  const manuellSoll = manuelleEintraege.reduce((s, e) => s + e.geplantMin, 0);
   const manuellIst = manuelleEintraege.reduce((s, e) => s + e.tatsaechlichMin, 0);
 
   return (
@@ -324,18 +330,22 @@ function TagDetailPanel({
                   >
                     +15m
                   </button>
-                  <label className="flex items-center gap-1">
-                    <span>Soll</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={5}
-                      value={e.geplantMin}
-                      onChange={(ev) => onBearbeiten(e, { geplantMin: Number(ev.target.value) })}
-                      className="w-14 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                    />
-                    <span>min</span>
-                  </label>
+                  {verschobeneEintragIds.has(e.id) ? (
+                    <span>Block verschoben – Soll zählt am neuen Tag</span>
+                  ) : (
+                    <label className="flex items-center gap-1">
+                      <span>Soll</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={5}
+                        value={e.geplantMin}
+                        onChange={(ev) => onBearbeiten(e, { geplantMin: Number(ev.target.value) })}
+                        className="w-14 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                      />
+                      <span>min</span>
+                    </label>
+                  )}
                 </div>
                 <input
                   placeholder="Notiz, z.B. welche Themen noch fehlen"
@@ -415,8 +425,8 @@ export default function WochenplanPage() {
   const typLabel = typ === 'A' ? abWochen.labelA : abWochen.labelB;
   const bloeckeWoche = useMemo(() => bloeckeDerWoche(stundenplan, typ), [stundenplan, typ]);
   const { startMin, endeMin } = useMemo(() => zeitRasterBereich(bloeckeWoche), [bloeckeWoche]);
-  const aktiveTageIdx = useMemo(() => aktiveWochentage(bloeckeWoche), [bloeckeWoche]);
-  const aktiveTage = aktiveTageIdx.map((idx) => tage[idx]);
+  const tageIso = tage.map((t) => t.iso);
+  const aktiveTage = aktiveWochentage(bloeckeWoche, eintraege, tageIso).map((idx) => tage[idx]);
 
   const sollGesamt = sollMinutenDerWoche(bloeckeWoche, eintraege);
   const istGesamt = istMinutenDerWoche(eintraege);
@@ -433,9 +443,8 @@ export default function WochenplanPage() {
 
   const erledigtIds = new Set(
     eintraege
-      .filter((e) => e.blockId)
       .filter((e) => {
-        const block = stundenplan.find((b) => b.id === e.blockId);
+        const block = sichtbarerBlockDesEintrags(e, bloeckeWoche, tageIso);
         return block ? e.tatsaechlichMin >= blockDauerMin(block) : false;
       })
       .map((e) => e.blockId as string),
@@ -467,15 +476,19 @@ export default function WochenplanPage() {
 
   const ausgewaehlterTagObj = tage.find((t) => t.iso === ausgewaehlteTagIso) ?? tage[0];
   const bloeckeTag = bloeckeWoche.filter((b) => tage[b.wochentag]?.iso === ausgewaehlteTagIso);
-  const gueltigeBlockIds = new Set(stundenplan.map((b) => b.id));
-  // Einträge, deren Block gelöscht/ersetzt wurde (z.B. durch einen .ics-Import), werden wie
-  // manuelle Einträge behandelt, damit sie sichtbar und bearbeitbar/löschbar bleiben, statt
-  // unsichtbar in den Wochensummen hängen zu bleiben.
-  const manuelleEintraegeTag = eintraege.filter(
-    (e) => e.tag === ausgewaehlteTagIso && (!e.blockId || !gueltigeBlockIds.has(e.blockId)),
-  );
-  const blockEintraegeTag = eintraege.filter(
-    (e) => e.tag === ausgewaehlteTagIso && e.blockId && gueltigeBlockIds.has(e.blockId),
+  // Einträge, deren Block gelöscht/ersetzt (z.B. durch einen .ics-Import) oder so bearbeitet wurde,
+  // dass er an ihrem Tag nicht mehr als Lernblock erscheint, werden wie manuelle Einträge behandelt,
+  // damit sie sichtbar und bearbeitbar/löschbar bleiben, statt unsichtbar in den Wochensummen hängen
+  // zu bleiben.
+  const manuelleEintraegeTag: WochenplanEintrag[] = [];
+  const blockEintraegeTag: WochenplanEintrag[] = [];
+  eintraege
+    .filter((e) => e.tag === ausgewaehlteTagIso)
+    .forEach((e) => (sichtbarerBlockDesEintrags(e, bloeckeWoche, tageIso) ? blockEintraegeTag : manuelleEintraegeTag).push(e));
+  const manuellSollTag = manuelleEintraegeTag.reduce((s, e) => s + zusatzSollMinDesEintrags(e, bloeckeWoche), 0);
+  // Manuell gelistete Einträge, deren Block an einen anderen Tag der Woche verschoben wurde: ihr Soll zählt dort.
+  const verschobeneEintragIds = new Set(
+    manuelleEintraegeTag.filter((e) => blockDesEintragsZaehltInWoche(e, bloeckeWoche)).map((e) => e.id),
   );
 
   return (
@@ -598,6 +611,8 @@ export default function WochenplanPage() {
             blockEintraege={blockEintraegeTag}
             onBearbeitenBlock={(block, patch) => blockEintragAktualisieren(block, ausgewaehlterTagObj.iso, patch)}
             manuelleEintraege={manuelleEintraegeTag}
+            manuellSoll={manuellSollTag}
+            verschobeneEintragIds={verschobeneEintragIds}
             module={module}
             onHinzufuegen={(modulId, geplantMin) =>
               upsertEintrag(montag, {
