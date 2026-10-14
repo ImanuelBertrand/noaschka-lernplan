@@ -75,16 +75,15 @@ export function simuliereZielschnitt(
 ): { benoetigterSchnittOffen: number | null; erreichbar: boolean; ectsOffenGewertet: number } {
   const bestanden = module.filter(istBestanden);
   const offen = module.filter((m) => !istBestanden(m));
-  const { schnitt: bisherigerSchnitt } = berechneNotenschnitt(bestanden);
-  const ectsBestanden = bestanden.reduce((s, m) => s + m.ects, 0);
+  const { schnitt: bisherigerSchnitt, ectsGewertet: ectsBisherGewertet } = berechneNotenschnitt(bestanden);
   const ectsOffenGewertet = offen.reduce((s, m) => s + m.ects, 0);
 
   if (!ectsOffenGewertet) {
     return { benoetigterSchnittOffen: null, erreichbar: bisherigerSchnitt != null && bisherigerSchnitt <= zielschnitt, ectsOffenGewertet: 0 };
   }
 
-  const sumGewichtetBisher = (bisherigerSchnitt ?? 0) * ectsBestanden;
-  const gesamtEcts = ectsBestanden + ectsOffenGewertet;
+  const sumGewichtetBisher = (bisherigerSchnitt ?? 0) * ectsBisherGewertet;
+  const gesamtEcts = ectsBisherGewertet + ectsOffenGewertet;
   const benoetigt = (zielschnitt * gesamtEcts - sumGewichtetBisher) / ectsOffenGewertet;
 
   return {
