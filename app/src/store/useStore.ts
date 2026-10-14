@@ -50,7 +50,7 @@ type Store = AppState & StoreActions;
 
 const PERSIST_VERSION = 1;
 
-/** Ergänzt fehlende Felder (stundenplan, settings.abWochen) bei älteren gespeicherten/importierten Ständen, ohne vorhandene Daten anzutasten. */
+/** Ergänzt fehlende Felder (stundenplan, settings.abWochen) bei älteren gespeicherten/importierten Ständen, ohne vorhandene Daten anzutasten. Ein bewusst geleerter Stundenplan ([]) bleibt leer. */
 function backfillState(partial: unknown): AppState {
   const basis = defaultState();
   if (!partial || typeof partial !== 'object') return basis;
@@ -58,7 +58,7 @@ function backfillState(partial: unknown): AppState {
   return {
     ...basis,
     ...p,
-    stundenplan: Array.isArray(p.stundenplan) && p.stundenplan.length ? p.stundenplan : basis.stundenplan,
+    stundenplan: Array.isArray(p.stundenplan) ? p.stundenplan : basis.stundenplan,
     settings: {
       ...basis.settings,
       ...p.settings,
