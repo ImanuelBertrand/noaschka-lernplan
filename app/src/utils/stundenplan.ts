@@ -40,14 +40,50 @@ export function zeitRasterBereich(bloeckeDerWoche: StundenplanBlock[]): { startM
 
 const WOCHENTAGE_MO_FR = [0, 1, 2, 3, 4];
 
-export function aktiveWochentage(bloeckeDerWoche: StundenplanBlock[]): number[] {
-  const wochenende = [5, 6].filter((tag) => bloeckeDerWoche.some((b) => b.wochentag === tag));
+// Sa/So sind aktiv, wenn dort ein Block liegt oder ein Eintrag der Woche auf sie datiert ist
+// (z.B. Lernzeit an einem inzwischen verschobenen/gelöschten Wochenend-Block).
+export function aktiveWochentage(
+  bloeckeDerWoche: StundenplanBlock[],
+  eintraege: WochenplanEintrag[],
+  tageIso: string[],
+): number[] {
+  const wochenende = [5, 6].filter(
+    (tag) => bloeckeDerWoche.some((b) => b.wochentag === tag) || eintraege.some((e) => e.tag === tageIso[tag]),
+  );
   return [...WOCHENTAGE_MO_FR, ...wochenende];
+}
+
+// Liefert den Lernblock, an dem ein Eintrag hängt – aber nur, wenn dieser Block in der Woche
+// tatsächlich am Tag des Eintrags als Lernblock angezeigt wird. Wurde der Block gelöscht oder
+// so bearbeitet (Wochentag, A/B-Woche, Art), dass er dort nicht mehr erscheint, gilt der Eintrag
+// als manueller Eintrag, damit er sichtbar bleibt und Soll/Ist konsistent zählen.
+// tageIso: ISO-Daten der Woche, Index = Wochentag (0 = Montag).
+export function sichtbarerBlockDesEintrags(
+  eintrag: WochenplanEintrag,
+  stundenplanDerWoche: StundenplanBlock[],
+  tageIso: string[],
+): StundenplanBlock | undefined {
+  if (!eintrag.blockId) return undefined;
+  return stundenplanDerWoche.find(
+    (b) => b.id === eintrag.blockId && b.art === 'lernblock' && tageIso[b.wochentag] === eintrag.tag,
+  );
+}
+
+export function blockDesEintragsZaehltInWoche(eintrag: WochenplanEintrag, stundenplanDerWoche: StundenplanBlock[]): boolean {
+  if (!eintrag.blockId) return false;
+  return stundenplanDerWoche.some((b) => b.id === eintrag.blockId && b.art === 'lernblock');
+}
+
+// Soll-Minuten, die ein Eintrag zusätzlich zu den Lernblöcken der Woche beiträgt: seine geplanten
+// Minuten – außer sein Block erscheint diese Woche als Lernblock (am Tag des Eintrags oder, wenn
+// verschoben, an einem anderen Tag), dann ist das Soll bereits über den Block gezählt.
+export function zusatzSollMinDesEintrags(eintrag: WochenplanEintrag, stundenplanDerWoche: StundenplanBlock[]): number {
+  return blockDesEintragsZaehltInWoche(eintrag, stundenplanDerWoche) ? 0 : eintrag.geplantMin;
 }
 
 export function sollMinutenDerWoche(stundenplanDerWoche: StundenplanBlock[], eintraege: WochenplanEintrag[]): number {
   const lernblockMin = stundenplanDerWoche.filter((b) => b.art === 'lernblock').reduce((s, b) => s + blockDauerMin(b), 0);
-  const manuelleMin = eintraege.filter((e) => !e.blockId).reduce((s, e) => s + e.geplantMin, 0);
+  const manuelleMin = eintraege.reduce((s, e) => s + zusatzSollMinDesEintrags(e, stundenplanDerWoche), 0);
   return lernblockMin + manuelleMin;
 }
 
@@ -82,7 +118,7 @@ export function fachZeitenDerWoche(stundenplanDerWoche: StundenplanBlock[], eint
     if (!e.modulId) return;
     const f = eintrag(e.modulId);
     f.istMin += e.tatsaechlichMin;
-    if (!e.blockId) f.sollMin += e.geplantMin;
+    f.sollMin += zusatzSollMinDesEintrags(e, stundenplanDerWoche);
   });
 
   return Array.from(map.values());
