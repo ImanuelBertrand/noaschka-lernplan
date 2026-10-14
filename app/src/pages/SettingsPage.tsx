@@ -213,7 +213,8 @@ export default function SettingsPage() {
         if (!istGueltigerState(data)) throw new Error('invalid');
         if (confirm('Import ersetzt alle aktuellen Daten (Module, Lernpläne, Wochenpläne, Einstellungen). Fortfahren?')) {
           importState(data);
-          setForm(data.settings);
+          // Backgefüllte Settings aus dem Store, nicht data.settings: ältere Backups haben z.B. kein abWochen.
+          setForm(useStore.getState().settings);
         }
       } catch {
         setImportFehler('Ungültige Backup-Datei.');
